@@ -1,1 +1,1 @@
-# dynamodb-queries
+# Serverless dynamodb-queries

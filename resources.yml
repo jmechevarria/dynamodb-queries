@@ -1,0 +1,856 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: DynamoDB Queries app backend
+
+Parameters:
+  Environment:
+    Type: String
+    AllowedValues:
+      - sandbox
+  AllowedCorsOrigins:
+    Type: String
+
+Globals:
+  Function:
+    Handler: app.lambdaHandler
+    Runtime: nodejs14.x
+    Timeout: 5
+    Tracing: Active
+    Environment:
+      Variables:
+        ENVIRONMENT: !Ref Environment
+        AWS_NODEJS_CONNECTION_REUSE_ENABLED: 1
+    Tags:
+      app: dynamodb-queries
+
+Resources:
+
+#  ██╗      █████╗ ███╗   ███╗██████╗ ██████╗  █████╗
+#  ██║     ██╔══██╗████╗ ████║██╔══██╗██╔══██╗██╔══██╗
+#  ██║     ███████║██╔████╔██║██████╔╝██║  ██║███████║
+#  ██║     ██╔══██║██║╚██╔╝██║██╔══██╗██║  ██║██╔══██║
+#  ███████╗██║  ██║██║ ╚═╝ ██║██████╔╝██████╔╝██║  ██║
+#  ╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚═════╝ ╚═════╝ ╚═╝  ╚═╝
+#
+
+  LambdaAuthorizer:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: DynamoDBQueriesLambdaAuthorizer
+      CodeUri: src/lambda-authorizer
+      AutoPublishAlias: LambdaAuthorizerAlias
+      Policies:
+        - Statement:
+          - Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+              - secretsmanager:DescribeSecret
+              - secretsmanager:ListSecretVersionIds
+            Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:*'
+
+  LoginLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: Login
+      CodeUri: src/login
+      AutoPublishAlias: LoginLambdaAlias
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref UserTable
+      Policies:
+        - Statement:
+          - Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+              - secretsmanager:DescribeSecret
+              - secretsmanager:ListSecretVersionIds
+            Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:*'
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserTable
+
+  SignupLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: Signup
+      CodeUri: src/sign-up
+      AutoPublishAlias: SignupLambdaAlias
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref UserTable
+      Policies:
+        - Statement:
+          - Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+              - secretsmanager:DescribeSecret
+              - secretsmanager:ListSecretVersionIds
+            Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:*'
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UserTable
+
+#   █████╗ ██████╗ ██╗     ██████╗  █████╗ ████████╗███████╗██╗    ██╗ █████╗ ██╗   ██╗
+#  ██╔══██╗██╔══██╗██║    ██╔════╝ ██╔══██╗╚══██╔══╝██╔════╝██║    ██║██╔══██╗╚██╗ ██╔╝
+#  ███████║██████╔╝██║    ██║  ███╗███████║   ██║   █████╗  ██║ █╗ ██║███████║ ╚████╔╝
+#  ██╔══██║██╔═══╝ ██║    ██║   ██║██╔══██║   ██║   ██╔══╝  ██║███╗██║██╔══██║  ╚██╔╝
+#  ██║  ██║██║     ██║    ╚██████╔╝██║  ██║   ██║   ███████╗╚███╔███╔╝██║  ██║   ██║
+#  ╚═╝  ╚═╝╚═╝     ╚═╝     ╚═════╝ ╚═╝  ╚═╝   ╚═╝   ╚══════╝ ╚══╝╚══╝ ╚═╝  ╚═╝   ╚═╝
+#
+
+  DynamoDBQueriesApiGateway:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: dynamodb-queries
+      Description: API gateway for DynamoDB Queries
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+      Tags:
+        - Key: app
+          Value: dynamodb-queries
+
+  ApiGatewayAccount:
+    Type: AWS::ApiGateway::Account
+    Properties:
+      CloudWatchRoleArn: !GetAtt DynamoDBQueriesApiGatewayRole.Arn
+
+  DynamoDBQueriesApiAuthorizer:
+    Type: AWS::ApiGateway::Authorizer
+    Properties:
+      AuthorizerCredentials: !GetAtt LambdaAuthorizerInvocationRole.Arn
+      AuthorizerResultTtlInSeconds: 300
+      AuthorizerUri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaAuthorizer.Arn}:LambdaAuthorizerAlias/invocations'
+      Type: TOKEN
+      Name: DynamoDBQueriesApiAuthorizer
+      IdentitySource: method.request.header.Authorization
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+
+  DynamoDBQueriesApiGatewayDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - LoginMethod
+      - SignupMethod
+    Properties:
+      Description: !Sub "DynamoDB Queries backend ${Environment} API Gateway Deployment"
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+      StageName: !Sub ${Environment}-dynamodb-queries
+      StageDescription:
+        Description: !Sub "Stage ${Environment}-DynamoDBQueries"
+        CachingEnabled: false
+        LoggingLevel: INFO
+        Tags:
+          - Key: app
+            Value: dynamodb-queries-api
+
+  RequestParametersValidator:
+    Type: AWS::ApiGateway::RequestValidator
+    Properties:
+      Name: RequestParametersValidator
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+      ValidateRequestBody: false
+      ValidateRequestParameters: true
+
+  RequestBodyValidator:
+    Type: AWS::ApiGateway::RequestValidator
+    Properties:
+      Name: RequestBodyValidator
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+      ValidateRequestBody: true
+      ValidateRequestParameters: false
+
+  FullRequestValidator:
+    Type: AWS::ApiGateway::RequestValidator
+    Properties:
+      Name: FullRequestValidator
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+      ValidateRequestBody: true
+      ValidateRequestParameters: true
+
+  LoginResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt DynamoDBQueriesApiGateway.RootResourceId
+      PathPart: login
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+
+  LoginMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+      ResourceId: !Ref LoginResource
+      OperationName: Login
+      HttpMethod: POST
+      AuthorizationType: NONE
+      RequestValidatorId: !Ref RequestBodyValidator
+      RequestModels:
+        application/json: !Ref LoginModel
+      Integration:
+        Type: AWS
+        Credentials: !GetAtt DynamoDBQueriesApiGatewayRole.Arn
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LoginLambda.Arn}:LoginLambdaAlias/invocations"
+        RequestTemplates:
+          application/json: |
+            {
+              "email": "$input.path('email')",
+              "password": "$input.path('password')"
+            }
+        PassthroughBehavior: WHEN_NO_TEMPLATES
+        IntegrationResponses:
+          - StatusCode: '200'
+            ResponseTemplates:
+              application/json: |
+                {
+                  "result": $input.json('$')
+                }
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+          - StatusCode: '401'
+            SelectionPattern: '401.*'
+            ResponseTemplates:
+              application/json: |
+                {
+                  "result": { "message": "$input.path('$').errorMessage" }
+                }
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+          - StatusCode: '500'
+            SelectionPattern: '500.*'
+            ResponseTemplates:
+              application/json: |
+                {
+                  "result" : { "message": "Internal Server Error" }
+                }
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+      MethodResponses:
+        - StatusCode: '200'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers:
+              type: string
+            method.response.header.Access-Control-Allow-Methods:
+              type: string
+            method.response.header.Access-Control-Allow-Origin:
+              type: string
+        - StatusCode: '401'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers:
+              type: string
+            method.response.header.Access-Control-Allow-Methods:
+              type: string
+            method.response.header.Access-Control-Allow-Origin:
+              type: string
+        - StatusCode: '500'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers:
+              type: string
+            method.response.header.Access-Control-Allow-Methods:
+              type: string
+            method.response.header.Access-Control-Allow-Origin:
+              type: string
+
+  LoginOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+      ResourceId: !Ref LoginResource
+      HttpMethod: OPTIONS
+      Integration:
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+        - StatusCode: '200'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel'"
+            method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+            method.response.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+          ResponseTemplates:
+            application/json: ''
+        Type: MOCK
+        PassthroughBehavior: WHEN_NO_TEMPLATES
+      MethodResponses:
+      - StatusCode: '200'
+        ResponseModels:
+          application/json: 'Empty'
+        ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers:
+              type: string
+            method.response.header.Access-Control-Allow-Methods:
+              type: string
+            method.response.header.Access-Control-Allow-Origin:
+              type: string
+
+  SignupResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt DynamoDBQueriesApiGateway.RootResourceId
+      PathPart: signup
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+
+  SignupMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+      ResourceId: !Ref SignupResource
+      OperationName: Signup
+      HttpMethod: POST
+      AuthorizationType: NONE
+      RequestValidatorId: !Ref RequestBodyValidator
+      RequestModels:
+        application/json: !Ref SignupModel
+      Integration:
+        Type: AWS
+        Credentials: !GetAtt DynamoDBQueriesApiGatewayRole.Arn
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${SignupLambda.Arn}:SignupLambdaAlias/invocations"
+        RequestTemplates:
+          application/json: |
+            {
+              "email": "$input.path('email')",
+              "password": "$input.path('password')",
+              "name": "$input.path('name')"
+            }
+        PassthroughBehavior: WHEN_NO_TEMPLATES
+        IntegrationResponses:
+          - StatusCode: '202'
+            ResponseTemplates:
+              application/json: |
+                {
+                  "result": $input.json('$')
+                }
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+          - StatusCode: '409'
+            SelectionPattern: '^409.*'
+            ResponseTemplates:
+              application/json: |
+                {
+                  "result" : { "message": "$input.path('$').errorMessage" }
+                }
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+          - StatusCode: '500'
+            SelectionPattern: '500.*'
+            ResponseTemplates:
+              application/json: |
+                {
+                  "result" : { "message": "Internal Server Error" }
+                }
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+      MethodResponses:
+        - StatusCode: '202'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers:
+              type: string
+            method.response.header.Access-Control-Allow-Methods:
+              type: string
+            method.response.header.Access-Control-Allow-Origin:
+              type: string
+        - StatusCode: '409'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers:
+              type: string
+            method.response.header.Access-Control-Allow-Methods:
+              type: string
+            method.response.header.Access-Control-Allow-Origin:
+              type: string
+        - StatusCode: '500'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers:
+              type: string
+            method.response.header.Access-Control-Allow-Methods:
+              type: string
+            method.response.header.Access-Control-Allow-Origin:
+              type: string
+
+  SignupOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+      ResourceId: !Ref SignupResource
+      HttpMethod: OPTIONS
+      Integration:
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+        - StatusCode: '200'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel'"
+            method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+            method.response.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+          ResponseTemplates:
+            application/json: ''
+        Type: MOCK
+        PassthroughBehavior: WHEN_NO_TEMPLATES
+      MethodResponses:
+      - StatusCode: '200'
+        ResponseModels:
+          application/json: 'Empty'
+        ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers:
+              type: string
+            method.response.header.Access-Control-Allow-Methods:
+              type: string
+            method.response.header.Access-Control-Allow-Origin:
+              type: string
+
+#  ███╗   ███╗ ██████╗ ██████╗ ███████╗██╗     ███████╗
+#  ████╗ ████║██╔═══██╗██╔══██╗██╔════╝██║     ██╔════╝
+#  ██╔████╔██║██║   ██║██║  ██║█████╗  ██║     ███████╗
+#  ██║╚██╔╝██║██║   ██║██║  ██║██╔══╝  ██║     ╚════██║
+#  ██║ ╚═╝ ██║╚██████╔╝██████╔╝███████╗███████╗███████║
+#  ╚═╝     ╚═╝ ╚═════╝ ╚═════╝ ╚══════╝╚══════╝╚══════╝
+#
+
+  LoginModel:
+    Type: AWS::ApiGateway::Model
+    Properties:
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+      ContentType: application/json
+      Description: Login model
+      Name: LoginModel
+      Schema:
+        "$schema": "http://json-schema.org/draft-04/schema#"
+        title: LoginModel
+        type: object
+        required:
+          - email
+          - password
+        properties:
+          email:
+            type: string
+            format: email
+          password:
+            type: string
+            minLength: 8
+            maxLength: 24
+
+  SignupModel:
+    Type: AWS::ApiGateway::Model
+    Properties:
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+      ContentType: application/json
+      Description: Signup model
+      Name: SignupModel
+      Schema:
+        "$schema": "http://json-schema.org/draft-04/schema#"
+        title: SignupModel
+        type: object
+        required:
+          - email
+          - password
+          - name
+        properties:
+          email:
+            type: string
+            format: email
+          password:
+            type: string
+            minLength: 8
+            maxLength: 24
+          name:
+            type: string
+
+#   ██████╗  █████╗ ████████╗███████╗██╗    ██╗ █████╗ ██╗   ██╗    ██████╗ ███████╗███████╗██████╗  ██████╗ ███╗   ██╗███████╗███████╗███████╗
+#  ██╔════╝ ██╔══██╗╚══██╔══╝██╔════╝██║    ██║██╔══██╗╚██╗ ██╔╝    ██╔══██╗██╔════╝██╔════╝██╔══██╗██╔═══██╗████╗  ██║██╔════╝██╔════╝██╔════╝
+#  ██║  ███╗███████║   ██║   █████╗  ██║ █╗ ██║███████║ ╚████╔╝     ██████╔╝█████╗  ███████╗██████╔╝██║   ██║██╔██╗ ██║███████╗█████╗  ███████╗
+#  ██║   ██║██╔══██║   ██║   ██╔══╝  ██║███╗██║██╔══██║  ╚██╔╝      ██╔══██╗██╔══╝  ╚════██║██╔═══╝ ██║   ██║██║╚██╗██║╚════██║██╔══╝  ╚════██║
+#  ╚██████╔╝██║  ██║   ██║   ███████╗╚███╔███╔╝██║  ██║   ██║       ██║  ██║███████╗███████║██║     ╚██████╔╝██║ ╚████║███████║███████╗███████║
+#   ╚═════╝ ╚═╝  ╚═╝   ╚═╝   ╚══════╝ ╚══╝╚══╝ ╚═╝  ╚═╝   ╚═╝       ╚═╝  ╚═╝╚══════╝╚══════╝╚═╝      ╚═════╝ ╚═╝  ╚═══╝╚══════╝╚══════╝╚══════╝
+#
+
+  GatewayResponseAccessDenied:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel,Access-Token'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,PATCH,DELETE,OPTIONS'"
+        gatewayresponse.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+      ResponseTemplates:
+        application/json: |
+          {
+            "result": { "message":$context.error.messageString }
+          }
+      ResponseType: ACCESS_DENIED
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+  GatewayResponseApiConfigurationError:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel,Access-Token'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,PATCH,DELETE,OPTIONS'"
+        gatewayresponse.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+      ResponseTemplates:
+        application/json: |
+          {
+            "result": { "message":$context.error.messageString }
+          }
+      ResponseType: API_CONFIGURATION_ERROR
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+  GatewayResponseAuthorizerFailure:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel,Access-Token'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,PATCH,DELETE,OPTIONS'"
+        gatewayresponse.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+      ResponseTemplates:
+        application/json: |
+          {
+            "result": { "message":$context.error.messageString }
+          }
+      ResponseType: AUTHORIZER_FAILURE
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+  GatewayResponseAuthorizerConfigurationError:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel,Access-Token'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,PATCH,DELETE,OPTIONS'"
+        gatewayresponse.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+      ResponseTemplates:
+        application/json: |
+          {
+            "result": { "message":$context.error.messageString }
+          }
+      ResponseType: AUTHORIZER_CONFIGURATION_ERROR
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+  GatewayResponseBadRequestParameters:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel,Access-Token'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,PATCH,DELETE,OPTIONS'"
+        gatewayresponse.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+      ResponseTemplates:
+        application/json: |
+          {
+            "result": { "message":$context.error.messageString }
+          }
+      ResponseType: BAD_REQUEST_PARAMETERS
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+  GatewayResponseBadRequestBody:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel,Access-Token'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,PATCH,DELETE,OPTIONS'"
+        gatewayresponse.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+      ResponseTemplates:
+        application/json: |
+          {
+            "result": { "message":$context.error.validationErrorString }
+          }
+      ResponseType: BAD_REQUEST_BODY
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+  GatewayResponseDefault4xx:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel,Access-Token'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,PATCH,DELETE,OPTIONS'"
+        gatewayresponse.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+      ResponseTemplates:
+        application/json: |
+          {
+            "result": { "message":$context.error.messageString }
+          }
+      ResponseType: DEFAULT_4XX
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+  GatewayResponseDefault5xx:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel,Access-Token'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,PATCH,DELETE,OPTIONS'"
+        gatewayresponse.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+      ResponseTemplates:
+        application/json: |
+          {
+            "result": { "message":$context.error.messageString }
+          }
+      ResponseType: DEFAULT_5XX
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+  GatewayResponseExpiredToken:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel,Access-Token'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,PATCH,DELETE,OPTIONS'"
+        gatewayresponse.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+      ResponseTemplates:
+        application/json: |
+          {
+            "result": { "message":$context.error.messageString }
+          }
+      ResponseType: EXPIRED_TOKEN
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+  GatewayResponseInvalidSignature:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel,Access-Token'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,PATCH,DELETE,OPTIONS'"
+        gatewayresponse.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+      ResponseTemplates:
+        application/json: |
+          {
+            "result": { "message":$context.error.messageString }
+          }
+      ResponseType: INVALID_SIGNATURE
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+  GatewayResponseIntegrationFailure:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel,Access-Token'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,PATCH,DELETE,OPTIONS'"
+        gatewayresponse.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+      ResponseTemplates:
+        application/json: |
+          {
+            "result": { "message":$context.error.messageString }
+          }
+      ResponseType: INTEGRATION_FAILURE
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+  GatewayResponseIntegrationTimeout:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel,Access-Token'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,PATCH,DELETE,OPTIONS'"
+        gatewayresponse.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+      ResponseTemplates:
+        application/json: |
+          {
+            "result": { "message":$context.error.messageString }
+          }
+      ResponseType: INTEGRATION_TIMEOUT
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+  GatewayResponseInvalidApiKey:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel,Access-Token'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,PATCH,DELETE,OPTIONS'"
+        gatewayresponse.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+      ResponseTemplates:
+        application/json: |
+          {
+            "result": { "message":$context.error.messageString }
+          }
+      ResponseType: INVALID_API_KEY
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+  GatewayResponseMissingAuthenticationToken:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel,Access-Token'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,PATCH,DELETE,OPTIONS'"
+        gatewayresponse.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+      ResponseTemplates:
+        application/json: |
+          {
+            "result": { "message": "Method Not Allowed" }
+          }
+      ResponseType: MISSING_AUTHENTICATION_TOKEN
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+      StatusCode: '405'
+  GatewayResponseQuotaExceeded:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel,Access-Token'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,PATCH,DELETE,OPTIONS'"
+        gatewayresponse.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+      ResponseTemplates:
+        application/json: |
+          {
+            "result": { "message":$context.error.messageString }
+          }
+      ResponseType: QUOTA_EXCEEDED
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+  GatewayResponseRequestTooLarge:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel,Access-Token'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,PATCH,DELETE,OPTIONS'"
+        gatewayresponse.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+      ResponseTemplates:
+        application/json: |
+          {
+            "result": { "message":$context.error.messageString }
+          }
+      ResponseType: REQUEST_TOO_LARGE
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+  GatewayResponseResourceNotFound:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel,Access-Token'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,PATCH,DELETE,OPTIONS'"
+        gatewayresponse.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+      ResponseTemplates:
+        application/json: |
+          {
+            "result": { "message":$context.error.messageString }
+          }
+      ResponseType: RESOURCE_NOT_FOUND
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+  GatewayResponseThrottled:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel,Access-Token'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,PATCH,DELETE,OPTIONS'"
+        gatewayresponse.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+      ResponseTemplates:
+        application/json: |
+          {
+            "result": { "message":$context.error.messageString }
+          }
+      ResponseType: THROTTLED
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+  GatewayResponseUnauthorized:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel,Access-Token'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,PATCH,DELETE,OPTIONS'"
+        gatewayresponse.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+      ResponseTemplates:
+        application/json: |
+          {
+            "result": { "message":$context.error.messageString }
+          }
+      ResponseType: UNAUTHORIZED
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+  GatewayResponseUnsupportedMediaType:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel,Access-Token'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,PATCH,DELETE,OPTIONS'"
+        gatewayresponse.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+      ResponseTemplates:
+        application/json: |
+          {
+            "result": { "message":$context.error.messageString }
+          }
+      ResponseType: UNSUPPORTED_MEDIA_TYPE
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+
+#  ██████╗ ██╗   ██╗███╗   ██╗ █████╗ ███╗   ███╗ ██████╗ ██████╗ ██████╗
+#  ██╔══██╗╚██╗ ██╔╝████╗  ██║██╔══██╗████╗ ████║██╔═══██╗██╔══██╗██╔══██╗
+#  ██║  ██║ ╚████╔╝ ██╔██╗ ██║███████║██╔████╔██║██║   ██║██║  ██║██████╔╝
+#  ██║  ██║  ╚██╔╝  ██║╚██╗██║██╔══██║██║╚██╔╝██║██║   ██║██║  ██║██╔══██╗
+#  ██████╔╝   ██║   ██║ ╚████║██║  ██║██║ ╚═╝ ██║╚██████╔╝██████╔╝██████╔╝
+#  ╚═════╝    ╚═╝   ╚═╝  ╚═══╝╚═╝  ╚═╝╚═╝     ╚═╝ ╚═════╝ ╚═════╝ ╚═════╝
+#
+
+  UserTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      Tags:
+        - Key: app
+          Value: dynamodb-queries
+      AttributeDefinitions:
+        - AttributeName: email
+          AttributeType: S
+      KeySchema:
+        - AttributeName: email
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+
+#  ██████╗  ██████╗ ██╗     ███████╗███████╗
+#  ██╔══██╗██╔═══██╗██║     ██╔════╝██╔════╝
+#  ██████╔╝██║   ██║██║     █████╗  ███████╗
+#  ██╔══██╗██║   ██║██║     ██╔══╝  ╚════██║
+#  ██║  ██║╚██████╔╝███████╗███████╗███████║
+#  ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚══════╝╚══════╝
+#
+
+  DynamoDBQueriesApiGatewayRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: ApiGatewayServiceMainRole
+            Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - apigateway.amazonaws.com
+      Policies:
+        - PolicyName: apigateway
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:DescribeLogGroups
+                  - logs:DescribeLogStreams
+                  - logs:PutLogEvents
+                  - logs:GetLogEvents
+                  - logs:FilterLogEvents
+                  - lambda:InvokeFunction
+                Resource: "*"
+      Tags:
+        - Key: app
+          Value: dynamodb-queries
+
+  LambdaAuthorizerInvocationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowGatewayAuthorizerToInvokeLambda
+            Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - apigateway.amazonaws.com
+      Policies:
+        - PolicyName: CallLambdaAuthorizerPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource:
+                  - !Ref LambdaAuthorizer.Alias
+      Tags:
+        - Key: app
+          Value: dynamodb-queries
+
+Outputs:
+  apiStageName:
+    Value: !Sub ${Environment}-dynamodb-queries
+
+  apiGatewayId:
+    Value: !Sub ${DynamoDBQueriesApiGateway}
+
+  region:
+    Value: !Sub ${AWS::Region}

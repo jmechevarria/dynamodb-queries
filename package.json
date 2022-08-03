@@ -1,0 +1,21 @@
+{
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jmechevarria/dynamodb-queries"
+  },
+  "name": "serverless-dynamodb-queries",
+  "version": "1.0.0",
+  "description": "",
+  "private": true,
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "JMED <jmechevarria2015@gmail.com>",
+  "license": "ISC",
+  "devDependencies": {
+    "eslint": "^8.20.0",
+    "eslint-config-airbnb-base": "^15.0.0",
+    "eslint-plugin-import": "^2.26.0",
+    "nyc": "^15.1.0"
+  }
+}

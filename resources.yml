@@ -88,6 +88,36 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref UserTable
 
+  CreateContactLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: CreateContact
+      CodeUri: src/create-contact
+      AutoPublishAlias: CreateContactLambdaAlias
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref ContactTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ContactTable
+
+  GetContactsLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GetContacts
+      CodeUri: src/get-contacts
+      AutoPublishAlias: GetContactsLambdaAlias
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref ContactTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ContactTable
+        - Statement:
+          - Effect: Allow
+            Action: dynamodb:PartiQLSelect
+            Resource: !GetAtt ContactTable.Arn
+
 #   █████╗ ██████╗ ██╗     ██████╗  █████╗ ████████╗███████╗██╗    ██╗ █████╗ ██╗   ██╗
 #  ██╔══██╗██╔══██╗██║    ██╔════╝ ██╔══██╗╚══██╔══╝██╔════╝██║    ██║██╔══██╗╚██╗ ██╔╝
 #  ███████║██████╔╝██║    ██║  ███╗███████║   ██║   █████╗  ██║ █╗ ██║███████║ ╚████╔╝
@@ -328,12 +358,149 @@ Resources:
               method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel'"
               method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
               method.response.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
-          - StatusCode: '409'
-            SelectionPattern: '^409.*'
+          - StatusCode: '400'
+            SelectionPattern: '^400.*'
             ResponseTemplates:
               application/json: |
                 {
                   "result" : { "message": "$input.path('$').errorMessage" }
+                }
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+          - StatusCode: '500'
+            SelectionPattern: '500.*'
+            ResponseTemplates:
+              application/json: |
+                {
+                  "result" : { "message": "Internal Server Error" }
+                }
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+      MethodResponses:
+        - StatusCode: '202'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers:
+              type: string
+            method.response.header.Access-Control-Allow-Methods:
+              type: string
+            method.response.header.Access-Control-Allow-Origin:
+              type: string
+        - StatusCode: '400'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers:
+              type: string
+            method.response.header.Access-Control-Allow-Methods:
+              type: string
+            method.response.header.Access-Control-Allow-Origin:
+              type: string
+        - StatusCode: '500'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers:
+              type: string
+            method.response.header.Access-Control-Allow-Methods:
+              type: string
+            method.response.header.Access-Control-Allow-Origin:
+              type: string
+
+  SignupOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+      ResourceId: !Ref SignupResource
+      HttpMethod: OPTIONS
+      Integration:
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+        - StatusCode: '200'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel'"
+            method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+            method.response.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+          ResponseTemplates:
+            application/json: ''
+        Type: MOCK
+        PassthroughBehavior: WHEN_NO_TEMPLATES
+      MethodResponses:
+      - StatusCode: '200'
+        ResponseModels:
+          application/json: 'Empty'
+        ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers:
+              type: string
+            method.response.header.Access-Control-Allow-Methods:
+              type: string
+            method.response.header.Access-Control-Allow-Origin:
+              type: string
+
+  ContactsResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt DynamoDBQueriesApiGateway.RootResourceId
+      PathPart: contacts
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+
+  CreateContactMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+      ResourceId: !Ref ContactsResource
+      OperationName: CreateContact
+      HttpMethod: POST
+      AuthorizationType: CUSTOM
+      AuthorizerId: !Ref DynamoDBQueriesApiAuthorizer
+      RequestValidatorId: !Ref RequestBodyValidator
+      RequestParameters:
+        method.request.header.Authorization: true
+      RequestModels:
+        application/json: !Ref CreateContactModel
+      Integration:
+        Type: AWS
+        Credentials: !GetAtt DynamoDBQueriesApiGatewayRole.Arn
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CreateContactLambda.Arn}:CreateContactLambdaAlias/invocations"
+        RequestTemplates:
+          application/json: |
+            #set($addressLines = $input.path('addressLines'))
+            #set($noLines = $addressLines == "")
+            #set($addressLinesCount = $addressLines.size())
+            #set($dq = '"')
+
+            #if($noLines)
+                #set($addressLines = "$dq$dq")
+            #elseif ($addressLinesCount == 0)
+                #set($addressLines = [])
+            #end
+
+            {
+                "userEmail": "$context.authorizer.email",
+                "name": "$input.path('name')",
+                "phone": "$input.path('phone')",
+                "addressLines": $addressLines
+            }
+        PassthroughBehavior: WHEN_NO_TEMPLATES
+        IntegrationResponses:
+          - StatusCode: '202'
+            ResponseTemplates:
+              application/json: |
+                {
+                  "result": $input.json('$')
+                }
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+          - StatusCode: '409'
+            SelectionPattern: '409.*'
+            ResponseTemplates:
+              application/json: |
+                {
+                  "result" : { "message": "Contact already created" }
                 }
             ResponseParameters:
               method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel'"
@@ -376,12 +543,79 @@ Resources:
             method.response.header.Access-Control-Allow-Origin:
               type: string
 
-  SignupOptionsMethod:
+  GetContactsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+      ResourceId: !Ref ContactsResource
+      OperationName: GetContacts
+      HttpMethod: GET
+      AuthorizationType: CUSTOM
+      AuthorizerId: !Ref DynamoDBQueriesApiAuthorizer
+      RequestValidatorId: !Ref RequestParametersValidator
+      RequestParameters:
+        method.request.header.Authorization: true
+      Integration:
+        Type: AWS
+        Credentials: !GetAtt DynamoDBQueriesApiGatewayRole.Arn
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetContactsLambda.Arn}:GetContactsLambdaAlias/invocations"
+        RequestTemplates:
+          application/json: |
+            {
+              "userEmail": "$context.authorizer.email",
+              "name": "$input.params('name')",
+              "phone": "$input.params('phone')",
+              "limit": "$input.params('limit')",
+              "offset": "$input.params('offset')"
+            }
+        PassthroughBehavior: WHEN_NO_TEMPLATES
+        IntegrationResponses:
+          - StatusCode: '200'
+            ResponseTemplates:
+              application/json: |
+                {
+                  "result": $input.json('$')
+                }
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+          - StatusCode: '500'
+            SelectionPattern: '500.*'
+            ResponseTemplates:
+              application/json: |
+                {
+                  "result" : { "message": "Internal Server Error" }
+                }
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+      MethodResponses:
+        - StatusCode: '200'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers:
+              type: string
+            method.response.header.Access-Control-Allow-Methods:
+              type: string
+            method.response.header.Access-Control-Allow-Origin:
+              type: string
+        - StatusCode: '500'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers:
+              type: string
+            method.response.header.Access-Control-Allow-Methods:
+              type: string
+            method.response.header.Access-Control-Allow-Origin:
+              type: string
+
+  ContactsOptionsMethod:
     Type: AWS::ApiGateway::Method
     Properties:
       AuthorizationType: NONE
       RestApiId: !Ref DynamoDBQueriesApiGateway
-      ResourceId: !Ref SignupResource
+      ResourceId: !Ref ContactsResource
       HttpMethod: OPTIONS
       Integration:
         RequestTemplates:
@@ -390,7 +624,7 @@ Resources:
         - StatusCode: '200'
           ResponseParameters:
             method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel'"
-            method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+            method.response.header.Access-Control-Allow-Methods: "'GET,POST,DELETE,OPTIONS'"
             method.response.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
           ResponseTemplates:
             application/json: ''
@@ -464,6 +698,31 @@ Resources:
             maxLength: 24
           name:
             type: string
+
+  CreateContactModel:
+    Type: AWS::ApiGateway::Model
+    Properties:
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+      ContentType: application/json
+      Description: Create contact model
+      Name: CreateContactModel
+      Schema:
+        "$schema": "http://json-schema.org/draft-04/schema#"
+        title: CreateContactModel
+        type: object
+        required:
+          - name
+          - phone
+        properties:
+          name:
+            type: string
+          phone:
+            type: string
+            pattern: ^\+?\d{4,15}$
+          addressLines:
+            type: array
+            items:
+              type: string
 
 #   ██████╗  █████╗ ████████╗███████╗██╗    ██╗ █████╗ ██╗   ██╗    ██████╗ ███████╗███████╗██████╗  ██████╗ ███╗   ██╗███████╗███████╗███████╗
 #  ██╔════╝ ██╔══██╗╚══██╔══╝██╔════╝██║    ██║██╔══██╗╚██╗ ██╔╝    ██╔══██╗██╔════╝██╔════╝██╔══██╗██╔═══██╗████╗  ██║██╔════╝██╔════╝██╔════╝
@@ -766,9 +1025,6 @@ Resources:
   UserTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      Tags:
-        - Key: app
-          Value: dynamodb-queries
       AttributeDefinitions:
         - AttributeName: email
           AttributeType: S
@@ -776,6 +1032,48 @@ Resources:
         - AttributeName: email
           KeyType: HASH
       BillingMode: PAY_PER_REQUEST
+      Tags:
+        - Key: app
+          Value: dynamodb-queries
+
+  ContactTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: user_email
+          AttributeType: S
+        - AttributeName: composite_name_phone
+          AttributeType: S
+        # - AttributeName: name
+        #   AttributeType: S
+        # - AttributeName: phone
+        #   AttributeType: S
+      KeySchema:
+        - AttributeName: user_email
+          KeyType: HASH
+        - AttributeName: composite_name_phone
+          KeyType: RANGE
+      # LocalSecondaryIndexes:
+      #   - IndexName: name_index
+      #     KeySchema:
+      #       - AttributeName: user_email
+      #         KeyType: HASH
+      #       - AttributeName: name
+      #         KeyType: RANGE
+      #     Projection:
+      #       ProjectionType: ALL
+      #   - IndexName: phone_index
+      #     KeySchema:
+      #       - AttributeName: user_email
+      #         KeyType: HASH
+      #       - AttributeName: phone
+      #         KeyType: RANGE
+      #     Projection:
+      #       ProjectionType: ALL
+      BillingMode: PAY_PER_REQUEST
+      Tags:
+        - Key: app
+          Value: dynamodb-queries
 
 #  ██████╗  ██████╗ ██╗     ███████╗███████╗
 #  ██╔══██╗██╔═══██╗██║     ██╔════╝██╔════╝

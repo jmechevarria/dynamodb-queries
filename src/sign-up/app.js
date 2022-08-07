@@ -42,8 +42,8 @@ exports.lambdaHandler = async (event) => {
     throw new Error('500:Unexpected error: user not created');
   } catch (error) {
     console.error('Signing user up', error);
-
-    if (error?.name === 'ConditionalCheckFailedException') throw new Error('400:Email already registered');
+    console.warn('name', error.name);
+    if (error?.name === 'ConditionalCheckFailedException') throw new Error('400');
 
     throw error;
   }

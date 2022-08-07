@@ -22,5 +22,7 @@ module.exports = {
     'consistent-return': 0,
     'max-classes-per-file': 0,
     'no-plusplus': 0,
+    'no-param-reassign': 0,
+    radix: 0,
   },
 };

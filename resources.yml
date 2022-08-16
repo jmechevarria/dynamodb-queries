@@ -1044,32 +1044,11 @@ Resources:
           AttributeType: S
         - AttributeName: composite_name_phone
           AttributeType: S
-        # - AttributeName: name
-        #   AttributeType: S
-        # - AttributeName: phone
-        #   AttributeType: S
       KeySchema:
         - AttributeName: user_email
           KeyType: HASH
         - AttributeName: composite_name_phone
           KeyType: RANGE
-      # LocalSecondaryIndexes:
-      #   - IndexName: name_index
-      #     KeySchema:
-      #       - AttributeName: user_email
-      #         KeyType: HASH
-      #       - AttributeName: name
-      #         KeyType: RANGE
-      #     Projection:
-      #       ProjectionType: ALL
-      #   - IndexName: phone_index
-      #     KeySchema:
-      #       - AttributeName: user_email
-      #         KeyType: HASH
-      #       - AttributeName: phone
-      #         KeyType: RANGE
-      #     Projection:
-      #       ProjectionType: ALL
       BillingMode: PAY_PER_REQUEST
       Tags:
         - Key: app

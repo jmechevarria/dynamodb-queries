@@ -1,65 +1,62 @@
 const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
-const { QueryCommand, ExecuteStatementCommand } = require('@aws-sdk/lib-dynamodb');
+const { QueryCommand } = require('@aws-sdk/lib-dynamodb');
+const { CustomError } = require('./errors');
 
 const ddbClient = new DynamoDBClient({ region: process.env.AWS_REGION });
 
-exports.getContacts = ({
-  userEmail, phone, name, limit, offset,
+exports.getContacts = async ({
+  userEmail, limit, offset, name, phone, // forward,
 }) => {
+  // forward = forward !== 'false';
+  limit = parseInt(limit) || 20;
+
+  if (limit > 100) limit = 100;
+
+  let LastEvaluatedKey;
+
   try {
-    limit = parseInt(limit) || 20;
-    const params = {
-      // Statement: `SELECT * FROM "dynamodb-queries-ContactTable-3DUEW8MLA2TG" WHERE "user_email" = 'interview2@email.com'`,
-      // ExecuteStatementCommand: 'SELECT * FROM "' + process.env.TABLE_NAME + '" WHERE "user_email" = \'interview@email.com\' AND "composite_name_phone" = \'name::phone\'',
-      Statement: `SELECT * FROM "${process.env.TABLE_NAME}" WHERE "user_email" = ?`,
-      Parameters: [userEmail],
-      Limit: limit < 100 ? limit : 100,
-      // NextToken: offset ? JSON.parse(offset) : undefined,
+    LastEvaluatedKey = JSON.parse(Buffer.from(offset, 'base64').toString('ascii')) || undefined;
+    if (!LastEvaluatedKey.user_email || !LastEvaluatedKey.composite_name_phone) LastEvaluatedKey = undefined;
+  } catch (error) {
+    console.warn('Invalid offset', error);
+    LastEvaluatedKey = undefined;
+  }
 
-      // TableName: process.env.TABLE_NAME,
-      // KeyConditionExpression: 'user_email = :userEmail',
-      // ExpressionAttributeValues: { ':userEmail': userEmail },
-      // Limit: parseInt(limit) || 20,
-      ExclusiveStartKey: offset ? JSON.parse(offset) : undefined,
-    };
+  try {
+    const items = [];
+    let response;
 
-    if (limit === '1') {
-      params.Statement += ' AND "composite_name_phone" = ?';
-      params.Parameters.push(`${name}::${phone}`);
-    } else if (name) {
-      params.Statement += ' AND ';
-      params.Statement += '(contains(composite_name_phone, ?)';
-      params.Parameters.push(name);
+    do {
+      const params = {
+        TableName: process.env.TABLE_NAME,
+        KeyConditionExpression: 'user_email = :userEmail',
+        ExpressionAttributeValues: { ':userEmail': userEmail },
+        ExpressionAttributeNames: { '#name': 'name' },
+        ExclusiveStartKey: LastEvaluatedKey,
+        // ScanIndexForward: forward,
+        ProjectionExpression: '#name,phone,address_lines',
+        Limit: limit - items.length,
+      };
 
-      if (phone) {
-        params.Statement += ' OR contains(composite_name_phone, ?))';
-        params.Parameters.push(phone);
-      } else params.Statement += ')';
-    } else if (phone) {
-      params.Statement += ' AND (contains(composite_name_phone, ?))';
-      params.Parameters.push(phone);
-    }
+      if (name && phone) {
+        params.KeyConditionExpression += ' AND composite_name_phone = :composite_name_phone';
+        params.ExpressionAttributeValues[':composite_name_phone'] = `${name}::${phone}`;
+      }
 
-    console.log(params);
+      console.warn('params', params);
+      // eslint-disable-next-line no-await-in-loop
+      response = await ddbClient.send(new QueryCommand(params));
 
-    // if (name && phone) {
-    //   params.KeyConditionExpression += ' AND begins_with(phone, :phone)';
-    //   params.ExpressionAttributeValues[':name'] = name;
-    //   params.ExpressionAttributeValues[':phone'] = phone;
-    //   params.ExpressionAttributeNames = { '#name': 'name' };
-    //   params.FilterExpression = 'begins_with(#name, :name)';
-    // } else if (name) {
-    //   params.IndexName = 'name_index';
-    //   params.KeyConditionExpression += ' AND begins_with(#name, :name)';
-    //   params.ExpressionAttributeValues[':name'] = name;
-    //   params.ExpressionAttributeNames = { '#name': 'name' };
-    // } else if (phone) {
-    //   params.KeyConditionExpression += ' AND begins_with(phone, :phone)';
-    //   params.ExpressionAttributeValues[':phone'] = phone;
-    // }
+      if (response?.$metadata.httpStatusCode === 200) {
+        items.push(...response.Items);
+      } else throw new CustomError('Error executing query', response?.$metadata.httpStatusCode, response);
 
-    return ddbClient.send(new ExecuteStatementCommand(params));
-    // return ddbClient.send(new QueryCommand(params));
+      LastEvaluatedKey = response.LastEvaluatedKey;
+
+      console.warn(response);
+    } while (LastEvaluatedKey && items.length < limit);
+
+    return { contacts: items, LastEvaluatedKey };
   } catch (error) {
     console.error(`Getting contacts for ${userEmail}`, error);
 

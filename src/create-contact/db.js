@@ -16,7 +16,7 @@ exports.saveContact = ({
     return ddbClient.send(new PutCommand({
       TableName: process.env.TABLE_NAME,
       Item: {
-        user_email: userEmail, composite_name_phone: `${name}::${phone}`, address_lines: addressLines,
+        user_email: userEmail, composite_name_phone: `${name}::${phone}`, name, phone, address_lines: addressLines,
       },
       ExpressionAttributeValues: { ':userEmail': userEmail, ':composite_name_phone': `${phone}::${phone}` },
       ConditionExpression: 'user_email <> :userEmail AND composite_name_phone <> :composite_name_phone',

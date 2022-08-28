@@ -620,11 +620,57 @@ Resources:
             method.response.header.Access-Control-Allow-Origin:
               type: string
 
+  ContactsOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+      ResourceId: !Ref ContactsResource
+      HttpMethod: OPTIONS
+      Integration:
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+        - StatusCode: '200'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel'"
+            method.response.header.Access-Control-Allow-Methods: "'GET,POST,DELETE,OPTIONS'"
+            method.response.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+          ResponseTemplates:
+            application/json: ''
+        Type: MOCK
+        PassthroughBehavior: WHEN_NO_TEMPLATES
+      MethodResponses:
+      - StatusCode: '200'
+        ResponseModels:
+          application/json: 'Empty'
+        ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers:
+              type: string
+            method.response.header.Access-Control-Allow-Methods:
+              type: string
+            method.response.header.Access-Control-Allow-Origin:
+              type: string
+
+  ContactsByNameResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !Ref ContactsResource
+      PathPart: '{name}'
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+  
+  SingleContactResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !Ref ContactsByNameResource
+      PathPart: '{phone}'
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+
   DeleteContactMethod:
     Type: AWS::ApiGateway::Method
     Properties:
       RestApiId: !Ref DynamoDBQueriesApiGateway
-      ResourceId: !Ref ContactsResource
+      ResourceId: !Ref SingleContactResource
       OperationName: DeleteContact
       HttpMethod: DELETE
       AuthorizationType: CUSTOM
@@ -640,9 +686,9 @@ Resources:
         RequestTemplates:
           application/json: |
             {
-              "userEmail": "$context.authorizer.email"
+              "userEmail": "$context.authorizer.email",
               "name": "$input.params('name')",
-              "phone": "$input.params('phone')",
+              "phone": "$input.params('phone')"
             }
         PassthroughBehavior: WHEN_NO_TEMPLATES
         IntegrationResponses:
@@ -687,6 +733,14 @@ Resources:
               type: string
             method.response.header.Access-Control-Allow-Origin:
               type: string
+        - StatusCode: '404'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers:
+              type: string
+            method.response.header.Access-Control-Allow-Methods:
+              type: string
+            method.response.header.Access-Control-Allow-Origin:
+              type: string
         - StatusCode: '500'
           ResponseParameters:
             method.response.header.Access-Control-Allow-Headers:
@@ -696,12 +750,12 @@ Resources:
             method.response.header.Access-Control-Allow-Origin:
               type: string
 
-  ContactsOptionsMethod:
+  SingleContactOptionsMethod:
     Type: AWS::ApiGateway::Method
     Properties:
       AuthorizationType: NONE
       RestApiId: !Ref DynamoDBQueriesApiGateway
-      ResourceId: !Ref ContactsResource
+      ResourceId: !Ref SingleContactResource
       HttpMethod: OPTIONS
       Integration:
         RequestTemplates:
@@ -710,7 +764,7 @@ Resources:
         - StatusCode: '200'
           ResponseParameters:
             method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel'"
-            method.response.header.Access-Control-Allow-Methods: "'GET,POST,DELETE,OPTIONS'"
+            method.response.header.Access-Control-Allow-Methods: "'DELETE,OPTIONS'"
             method.response.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
           ResponseTemplates:
             application/json: ''

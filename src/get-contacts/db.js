@@ -5,9 +5,8 @@ const { CustomError } = require('./errors');
 const ddbClient = new DynamoDBClient({ region: process.env.AWS_REGION });
 
 exports.getContacts = async ({
-  userEmail, limit, offset, name, phone, // forward,
+  userEmail, limit, offset, name, phone,
 }) => {
-  // forward = forward !== 'false';
   limit = parseInt(limit) || 20;
 
   if (limit > 100) limit = 100;
@@ -33,7 +32,6 @@ exports.getContacts = async ({
         ExpressionAttributeValues: { ':userEmail': userEmail },
         ExpressionAttributeNames: { '#name': 'name' },
         ExclusiveStartKey: LastEvaluatedKey,
-        // ScanIndexForward: forward,
         ProjectionExpression: '#name,phone,address_lines',
         Limit: limit - items.length,
       };
@@ -46,12 +44,21 @@ exports.getContacts = async ({
       console.warn('params', params);
       // eslint-disable-next-line no-await-in-loop
       response = await ddbClient.send(new QueryCommand(params));
-
+      const responseItems = response.Items;
       if (response?.$metadata.httpStatusCode === 200) {
-        items.push(...response.Items);
+        items.push(...responseItems);
       } else throw new CustomError('Error executing query', response?.$metadata.httpStatusCode, response);
 
       LastEvaluatedKey = response.LastEvaluatedKey;
+
+      const lastItem = responseItems?.[responseItems.length - 1];
+
+      if (!LastEvaluatedKey && lastItem) {
+        LastEvaluatedKey = {
+          user_email: userEmail,
+          composite_name_phone: `${lastItem.name}::${lastItem.phone}`,
+        };
+      }
 
       console.warn(response);
     } while (LastEvaluatedKey && items.length < limit);

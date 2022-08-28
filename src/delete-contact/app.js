@@ -1,3 +1,4 @@
+const { CustomError } = require('./errors');
 const db = require('./db');
 
 exports.lambdaHandler = async (event) => {
@@ -9,9 +10,11 @@ exports.lambdaHandler = async (event) => {
 
     console.warn(response);
     if (response?.$metadata.httpStatusCode === 200) {
-      console.log(`Deleted contact ${event.name} with phone ${event.phone}`);
+      if (response.Attributes) {
+        console.log(`Deleted contact ${event.name} with phone ${event.phone}`);
 
-      return true;
+        return true;
+      } throw new CustomError('Not found', 404, `No contact found for name ${event.name} and phone ${event.phone}`);
     }
 
     console.error('Failed to delete contact', JSON.stringify(response));
@@ -20,7 +23,7 @@ exports.lambdaHandler = async (event) => {
   } catch (error) {
     console.error('Deleting contact', error);
 
-    if (error?.name === 'ConditionalCheckFailedException') throw new Error('409:Contact already registered');
+    if (error.code === 404) throw new Error(404);
 
     throw new Error('500');
   }

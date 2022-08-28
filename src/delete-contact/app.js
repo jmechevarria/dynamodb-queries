@@ -4,22 +4,21 @@ exports.lambdaHandler = async (event) => {
   console.log(`EVENT = ${JSON.stringify(event)}`);
 
   try {
-    if (!Array.isArray(event.addressLines)) delete event.addressLines;
+    // delete contact
+    const response = await db.deleteContact(event);
 
-    // create contact
-    const response = await db.saveContact(event);
-
+    console.warn(response);
     if (response?.$metadata.httpStatusCode === 200) {
-      console.log(`Created contact ${event.name}`);
+      console.log(`Deleted contact ${event.name} with phone ${event.phone}`);
 
-      return { contact: event };
+      return true;
     }
 
-    console.error('Failed to create contact', JSON.stringify(response));
+    console.error('Failed to delete contact', JSON.stringify(response));
 
     throw new Error();
   } catch (error) {
-    console.error('Creating contact', error);
+    console.error('Deleting contact', error);
 
     if (error?.name === 'ConditionalCheckFailedException') throw new Error('409:Contact already registered');
 

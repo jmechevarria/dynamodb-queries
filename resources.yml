@@ -113,10 +113,20 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref ContactTable
-        - Statement:
-          - Effect: Allow
-            Action: dynamodb:PartiQLSelect
-            Resource: !GetAtt ContactTable.Arn
+
+  DeleteContactLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      Timeout: 10
+      FunctionName: DeleteContact
+      CodeUri: src/delete-contact
+      AutoPublishAlias: DeleteContactLambdaAlias
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref ContactTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ContactTable
 
 #   █████╗ ██████╗ ██╗     ██████╗  █████╗ ████████╗███████╗██╗    ██╗ █████╗ ██╗   ██╗
 #  ██╔══██╗██╔══██╗██║    ██╔════╝ ██╔══██╗╚══██╔══╝██╔════╝██║    ██║██╔══██╗╚██╗ ██╔╝
@@ -594,6 +604,82 @@ Resources:
               method.response.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
       MethodResponses:
         - StatusCode: '200'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers:
+              type: string
+            method.response.header.Access-Control-Allow-Methods:
+              type: string
+            method.response.header.Access-Control-Allow-Origin:
+              type: string
+        - StatusCode: '500'
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers:
+              type: string
+            method.response.header.Access-Control-Allow-Methods:
+              type: string
+            method.response.header.Access-Control-Allow-Origin:
+              type: string
+
+  DeleteContactMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref DynamoDBQueriesApiGateway
+      ResourceId: !Ref ContactsResource
+      OperationName: DeleteContact
+      HttpMethod: DELETE
+      AuthorizationType: CUSTOM
+      AuthorizerId: !Ref DynamoDBQueriesApiAuthorizer
+      RequestValidatorId: !Ref RequestParametersValidator
+      RequestParameters:
+        method.request.header.Authorization: true
+      Integration:
+        Type: AWS
+        Credentials: !GetAtt DynamoDBQueriesApiGatewayRole.Arn
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${DeleteContactLambda.Arn}:DeleteContactLambdaAlias/invocations"
+        RequestTemplates:
+          application/json: |
+            {
+              "userEmail": "$context.authorizer.email"
+              "name": "$input.params('name')",
+              "phone": "$input.params('phone')",
+            }
+        PassthroughBehavior: WHEN_NO_TEMPLATES
+        IntegrationResponses:
+          - StatusCode: '204'
+            ResponseTemplates:
+              application/json: |
+                {
+                  "result": $input.json('$')
+                }
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel'"
+              method.response.header.Access-Control-Allow-Methods: "'DELETE,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+          - StatusCode: '404'
+            SelectionPattern: '404.*'
+            ResponseTemplates:
+              application/json: |
+                {
+                  "result" : { "message": "Not Found" }
+                }
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel'"
+              method.response.header.Access-Control-Allow-Methods: "'DELETE,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+          - StatusCode: '500'
+            SelectionPattern: '500.*'
+            ResponseTemplates:
+              application/json: |
+                {
+                  "result" : { "message": "Internal Server Error" }
+                }
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Requested-With,Channel'"
+              method.response.header.Access-Control-Allow-Methods: "'DELETE,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: !Sub "'${AllowedCorsOrigins}'"
+      MethodResponses:
+        - StatusCode: '204'
           ResponseParameters:
             method.response.header.Access-Control-Allow-Headers:
               type: string

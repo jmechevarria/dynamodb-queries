@@ -8,7 +8,6 @@ exports.lambdaHandler = async (event) => {
     // delete contact
     const response = await db.deleteContact(event);
 
-    console.warn(response);
     if (response?.$metadata.httpStatusCode === 200) {
       if (response.Attributes) {
         console.log(`Deleted contact ${event.name} with phone ${event.phone}`);
@@ -25,6 +24,6 @@ exports.lambdaHandler = async (event) => {
 
     if (error.code === 404) throw new Error(404);
 
-    throw new Error('500');
+    throw new Error(500);
   }
 };

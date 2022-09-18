@@ -11,16 +11,8 @@ const ddbClient = new DynamoDBClient({ region: process.env.AWS_REGION });
  */
 exports.deleteContact = ({
   userEmail, name, phone,
-}) => {
-  try {
-    return ddbClient.send(new DeleteCommand({
-      TableName: process.env.TABLE_NAME,
-      Key: { user_email: userEmail, composite_name_phone: `${name}::${phone}` },
-      ReturnValues: 'ALL_OLD',
-    }));
-  } catch (error) {
-    console.error(`Deleting contact ${name} with phone ${phone}`, error);
-
-    throw error;
-  }
-};
+}) => ddbClient.send(new DeleteCommand({
+  TableName: process.env.TABLE_NAME,
+  Key: { user_email: userEmail, composite_name_phone: `${name}::${phone}` },
+  ReturnValues: 'ALL_OLD',
+}));

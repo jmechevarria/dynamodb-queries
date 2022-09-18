@@ -5,7 +5,7 @@ const { CustomError } = require('./errors');
 const ddbClient = new DynamoDBClient({ region: process.env.AWS_REGION });
 
 exports.getContacts = async ({
-  userEmail, limit, offset, name, phone,
+  userEmail, name, phone, limit, offset,
 }) => {
   limit = parseInt(limit) || 20;
 
@@ -17,7 +17,7 @@ exports.getContacts = async ({
     LastEvaluatedKey = JSON.parse(Buffer.from(offset, 'base64').toString('ascii')) || undefined;
     if (!LastEvaluatedKey.user_email || !LastEvaluatedKey.composite_name_phone) LastEvaluatedKey = undefined;
   } catch (error) {
-    console.warn('Invalid offset', error);
+    console.error('Invalid offset', error);
     LastEvaluatedKey = undefined;
   }
 
@@ -41,7 +41,6 @@ exports.getContacts = async ({
         params.ExpressionAttributeValues[':composite_name_phone'] = `${name}::${phone}`;
       }
 
-      console.warn('params', params);
       // eslint-disable-next-line no-await-in-loop
       response = await ddbClient.send(new QueryCommand(params));
       const responseItems = response.Items;
@@ -59,8 +58,6 @@ exports.getContacts = async ({
           composite_name_phone: `${lastItem.name}::${lastItem.phone}`,
         };
       }
-
-      console.warn(response);
     } while (LastEvaluatedKey && items.length < limit);
 
     return { contacts: items, LastEvaluatedKey };
